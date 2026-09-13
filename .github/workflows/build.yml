@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Native tests + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Чистая логика формата (без wasm-bindgen) тестируется нативно,
+      # без wasm-pack — быстрая обратная связь при ошибках в кодировании/
+      # декодировании архива.
+      - name: Run unit tests
+        run: cargo test --lib --verbose
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  build-wasm:
+    name: Build WASM package
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-wasm-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-wasm-cargo-
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build (web target)
+        run: wasm-pack build --target web --out-dir www/pkg
+
+      - name: Assemble distributable package
+        run: |
+          mkdir -p dist/akrile
+          cp -r www dist/akrile/www
+          cp -r examples dist/akrile/examples
+          cp package.json README.md dist/akrile/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: akrile-wasm-build
+          path: dist/akrile
+          if-no-files-found: error
+          retention-days: 30

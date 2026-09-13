@@ -1,0 +1,11 @@
+{
+  "name": "akrile",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Custom .akrile archive format with a JSZip-compatible JS API, powered by Rust/WASM",
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir www/pkg",
+    "test": "cargo test --lib",
+    "convert": "node examples/zip-to-akrile.js"
+  }
+}
