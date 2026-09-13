@@ -45,7 +45,7 @@ const DEFAULT_LEVEL: u8 = 6;
 /// Минимальный размер валидного файла: header(10) + footer(16), 0 записей.
 const MIN_FILE_LEN: usize = 10 + 16;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct Entry {
     name: String,
     method: u8, // 0 = store, 1 = deflate
@@ -56,6 +56,7 @@ struct Entry {
 }
 
 #[wasm_bindgen]
+#[derive(Debug)]
 pub struct AkrileArchive {
     entries: Vec<Entry>,
 }
