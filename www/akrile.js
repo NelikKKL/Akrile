@@ -20,6 +20,13 @@ import initWasm, { AkrileArchive } from "./pkg/akrile.js";
 
 let readyPromise = null;
 
+const DEFAULT_LEVEL = 6;
+
+// wasm-bindgen бросает строки (JsValue::from_str) — приводим к Error
+function toError(e) {
+  return e instanceof Error ? e : new Error(`akrile: ${e}`);
+}
+
 // Один и тот же www/pkg (собранный `wasm-pack build --target web`) должен
 // работать и в браузере, и в Node — а generated init() по умолчанию делает
 // fetch() соседнего .wasm файла, что в Node не работает без явных байт.
@@ -61,8 +68,12 @@ function convertOut(u8, type = "uint8array") {
     case "blob":
       return new Blob([u8]);
     case "base64": {
+      // чанками: один вызов на 32 КБ вместо одного на байт
       let bin = "";
-      for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]);
+      const CHUNK = 0x8000;
+      for (let i = 0; i < u8.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, u8.subarray(i, i + CHUNK));
+      }
       return btoa(bin);
     }
     default:
@@ -79,7 +90,12 @@ class AkrileFile {
   /** Аналог JSZipObject#async(type) */
   async async(type = "uint8array") {
     await ensureInit();
-    const bytes = this._zip._inner.getFile(this.name);
+    let bytes;
+    try {
+      bytes = this._zip._inner.getFile(this.name);
+    } catch (e) {
+      throw toError(e);
+    }
     if (!bytes) throw new Error(`akrile: file not found in archive: ${this.name}`);
     return convertOut(bytes, type);
   }
@@ -94,7 +110,9 @@ export class Akrile {
 
   /**
    * file(name)            -> AkrileFile | null   (чтение)
-   * file(name, data, opts) -> this                (запись, opts.compression = "STORE"|"DEFLATE")
+   * file(name, data, opts) -> this                (запись)
+   *   opts.compression        = "STORE" | "DEFLATE"
+   *   opts.compressionOptions = { level: 0..10 }   (по умолчанию 6; 1-3 заметно быстрее упаковка)
    */
   file(name, data, options = {}) {
     const fullName = this._prefix + name;
@@ -105,7 +123,13 @@ export class Akrile {
 
     const bytes = toBytes(data);
     const store = options.compression === "STORE";
-    this._inner.addFile(fullName, bytes, store);
+    const lvl = options.compressionOptions?.level;
+    const level = Number.isInteger(lvl) ? Math.min(10, Math.max(0, lvl)) : DEFAULT_LEVEL;
+    try {
+      this._inner.addFile(fullName, bytes, store, level);
+    } catch (e) {
+      throw toError(e);
+    }
     this.files[fullName] = new AkrileFile(fullName, this);
     return this;
   }
@@ -113,7 +137,7 @@ export class Akrile {
   /** Упрощённая поддержка папок: возвращает "поднабор" с тем же интерфейсом. */
   folder(name) {
     const folderName = (this._prefix + name).replace(/\/?$/, "/");
-    this._inner.addFile(folderName, new Uint8Array(0), true);
+    this._inner.addFile(folderName, new Uint8Array(0), true, 0);
     this.files[folderName] = new AkrileFile(folderName, this);
 
     const sub = Object.create(Akrile.prototype);
@@ -144,8 +168,12 @@ export class Akrile {
     return convertOut(bytes, options.type || "uint8array");
   }
 
-  /** Аналог JSZip.loadAsync(data) */
-  static async loadAsync(data) {
+  /**
+   * Аналог JSZip.loadAsync(data, options)
+   *   options.checkCRC32 = true — проверять CRC32 при чтении каждого файла
+   *   (по умолчанию выключено ради скорости).
+   */
+  static async loadAsync(data, options = {}) {
     await ensureInit();
 
     let bytes;
@@ -158,7 +186,12 @@ export class Akrile {
     }
 
     const zip = new Akrile();
-    zip._inner = AkrileArchive.load(bytes);
+    try {
+      zip._inner = AkrileArchive.load(bytes);
+    } catch (e) {
+      throw toError(e);
+    }
+    zip._inner.setVerifyCrc(!!options.checkCRC32);
     for (const name of zip._inner.fileNames()) {
       zip.files[name] = new AkrileFile(name, zip);
     }

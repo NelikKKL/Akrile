@@ -17,6 +17,9 @@ js-sys = "0.3"
 # для `cargo test --lib` на нативном таргете
 
 [profile.release]
-opt-level = "z"
+# Было "z" (минимальный размер) — для deflate/CRC это заметно медленнее.
+# 3 = максимальная скорость; размер .wasm вырастет на десятки КБ.
+opt-level = 3
 lto = true
+codegen-units = 1
 panic = "abort"
